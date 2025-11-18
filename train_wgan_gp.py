@@ -23,10 +23,7 @@ def log_metrics(epoch, batch_idx, num_batches, d_loss, g_loss, critic_real, crit
 
 
 def gradient_penalty(critic, real_samples, fake_samples, cond_struct=None, mask=None, device="cpu"):
-    """
-    Compute gradient penalty for WGAN-GP.
-    critic(... ) must return shape (B, 1) or (B,)
-    """
+
     batch_size = real_samples.size(0)
     # random weight for interpolation between real and fake
     epsilon = torch.rand(batch_size, 1, 1, device=device)
@@ -34,9 +31,8 @@ def gradient_penalty(critic, real_samples, fake_samples, cond_struct=None, mask=
     interpolated.requires_grad_(True)
 
     with torch.backends.cudnn.flags(enabled=False):
-        mixed_scores = critic(interpolated, cond_struct, mask)  # expect (B,1) or (B,)
+        mixed_scores = critic(interpolated, cond_struct, mask)
 
-    # ensure mixed_scores is shape (B,) for grad calculation
     mixed_scores = mixed_scores.view(-1)
 
     grad_outputs = torch.ones_like(mixed_scores, device=device)
@@ -50,7 +46,6 @@ def gradient_penalty(critic, real_samples, fake_samples, cond_struct=None, mask=
         only_inputs=True
     )[0]
 
-    # gradient may be non-contiguous; use reshape (or contiguous().view)
     gradient = gradient.reshape(batch_size, -1)
     gradient_norm = gradient.norm(2, dim=1)
     penalty = torch.mean((gradient_norm - 1) ** 2)
@@ -58,9 +53,7 @@ def gradient_penalty(critic, real_samples, fake_samples, cond_struct=None, mask=
 
 
 def train_wgan_gp(generator, critic, loader, args, device):
-    """
-    loader: torch.utils.data.DataLoader returning dicts with keys 'seq','struct','mask'
-    """
+
     generator.train()
     critic.train()
 
@@ -82,9 +75,9 @@ def train_wgan_gp(generator, critic, loader, args, device):
         for i, batch in enumerate(loader):
             total_batches += 1
 
-            real_rna = batch['seq'].float().to(device)        # (B, L, 4)
-            cond_struct = batch['struct'].float().to(device)  # (B, L, 3)
-            mask = batch['mask'].float().to(device)           # (B, L)
+            real_rna = batch['seq'].float().to(device)
+            cond_struct = batch['struct'].float().to(device)
+            mask = batch['mask'].float().to(device)
             batch_size = real_rna.size(0)
 
             # ---------------------
@@ -120,12 +113,11 @@ def train_wgan_gp(generator, critic, loader, args, device):
             # ---------------------
             # Logging
             # ---------------------
-            # make sure to pass a numeric g_loss (not tensor)
             g_loss_for_log = generator_loss_val if isinstance(generator_loss_val, float) else (generator_loss.item() if 'generator_loss' in locals() else float('nan'))
             log_metrics(epoch, i, num_batches, critic_loss.item(), g_loss_for_log, critic_real, critic_fake, log_path)
 
             # ---------------------
-            # Save model periodically
+            # Save model
             # ---------------------
-            if total_batches % 30 == 0:
+            if total_batches % 30 == 0: #co ile zapisywac model
                 torch.save(generator.state_dict(), os.path.join(args.save_dir, f"generator_epoch_{epoch+1}_batch_{total_batches}.pth"))

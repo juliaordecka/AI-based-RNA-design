@@ -3,10 +3,7 @@ import torch.nn as nn
 import numpy as np
 
 class NoiseToRNAEmbedding(nn.Module):
-    """
-    Embedding z wektora losowego do sekwencji RNA.
-    Obsługuje dynamiczną długość sekwencji.
-    """
+
     def __init__(self, noise_dim, embedding_size):
         super().__init__()
         self.embedding_size = embedding_size
@@ -21,9 +18,7 @@ class NoiseToRNAEmbedding(nn.Module):
         return embedded
 
 class PositionalEncoding(nn.Module):
-    """
-    Sinusoidal positional encoding.
-    """
+
     def __init__(self, max_seq_len, embedding_size):
         super().__init__()
         positions = torch.arange(max_seq_len).unsqueeze(1).float()

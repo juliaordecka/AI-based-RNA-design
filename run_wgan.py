@@ -30,12 +30,10 @@ def main():
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=pad_collate)
     print(f"Dataset size: {len(dataset)} samples")
 
-    # Generator i krytyk (warunkowane strukturą)
     generator = ResNetGeneratorConditional(args.latent_dim).to(device)
     initialize_weights(generator)
     critic = CriticConditional().to(device)
 
-    # przekazujemy loader zamiast dataset
     train_wgan_gp(generator, critic, loader, args, device)
 
 if __name__ == "__main__":

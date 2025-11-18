@@ -1,60 +1,99 @@
-import os
-import numpy as np
-import torch
-import argparse
-from utils.noise_generator import generate_noise
-from models.resnet_generator_rna import ResNetGenerator
+#!/usr/bin/env python3
 
-def save_generated_fasta(generator, total_sequences, output_dir="sequences", latent_dim=256, device="cpu"):
+import argparse
+import torch
+from pathlib import Path
+from Bio import SeqIO
+
+from models.resnet_generator_rna import ResNetGeneratorConditional
+
+def one_hot_struct(dotbracket: str):
+    table = {'.': [1,0,0], '(': [0,1,0], ')': [0,0,1]}
+    vecs = [table.get(ch, [1,0,0]) for ch in dotbracket.strip()]
+    return torch.tensor(vecs, dtype=torch.float32)  # (L,3)
+
+def one_hot_to_rna(seq_oh):
+    bases = ['A','C','G','U']
+    if seq_oh.dim() == 3:
+        seq_oh = seq_oh[0]
+    indices = seq_oh.argmax(dim=-1).tolist()
+    return ''.join(bases[i] for i in indices)
+
+def parse_fasta_structs(path: Path, mode: str):
+    records = list(SeqIO.parse(str(path), "fasta"))
+    items = []
+    if mode == "struct":
+        for rec in records:
+            items.append((rec.id, str(rec.seq).strip()))
+    elif mode == "paired":
+        if len(records) % 2 != 0:
+            raise ValueError("paired mode expects even number of FASTA records (sequence, structure pairs).")
+        for i in range(0, len(records), 2):
+            seq_rec = records[i]
+            struct_rec = records[i+1]
+            items.append((seq_rec.id, str(struct_rec.seq).strip()))
+    else:
+        raise ValueError("mode must be 'struct' or 'paired'")
+    return items
+
+# ---------------- main ----------------
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--checkpoint", required=True, help="Path to generator .pth")
+    p.add_argument("--input", required=True, help="Input FASTA (structures) or paired FASTA")
+    p.add_argument("--mode", choices=["struct","paired"], default="struct", help="Input format")
+    p.add_argument("--n_samples", type=int, default=3, help="Ile sekwencji wygenerować dla każdej struktury")
+    p.add_argument("--latent_dim", type=int, default=256, help="latent dim (dopasuj do treningu)")
+    p.add_argument("--out", default="generated.fa", help="Wyjściowy FASTA z wygenerowanymi sekwencjami")
+    p.add_argument("--device", default=None, help="cpu or cuda (default autodetect)")
+    p.add_argument("--batch_generate", type=int, default=16, help="Ile próbek na batch podczas generacji")
+    p.add_argument("--strict_load", action="store_true", help="Użyć strict=True przy load_state_dict (domyślnie False)")
+    args = p.parse_args()
+
+    device = torch.device("cuda" if (args.device is None and torch.cuda.is_available()) else (args.device or "cpu"))
+    print("Using device:", device)
+
+    items = parse_fasta_structs(Path(args.input), args.mode)
+    if not items:
+        print("No structures found in input.")
+        return
+
+    state = torch.load(str(args.checkpoint), map_location=device)
+
+    generator = ResNetGeneratorConditional(args.latent_dim)
+    try:
+        generator.load_state_dict(state, strict=args.strict_load)
+    except RuntimeError as e:
+        print("Warning: load_state_dict failed with strict=", args.strict_load)
+        print("Error:", e)
+        if not args.strict_load:
+            generator.load_state_dict(state, strict=False)
+            print("Loaded with strict=False (some keys skipped).")
     generator.to(device)
     generator.eval()
-    
-    os.makedirs(output_dir, exist_ok=True)
-    nucleotides = ['A', 'C', 'G', 'U']
 
-    def decode_sequence(one_hot_sequence):
-        decoded_seq = []
-        for one_hot in one_hot_sequence:
-            max_index = np.argmax(one_hot)
-            if np.sum(one_hot) == 1:
-                decoded_seq.append(nucleotides[max_index])
-            else:
-                decoded_seq.append('N')
-        return "".join(decoded_seq)
+    out_f = open(args.out, "w")
 
-    with torch.no_grad():
-        z = generate_noise(latent_dim, total_sequences).to(device)
-        generated_sequences = generator(z).cpu().numpy()
-        fasta_path = os.path.join(output_dir, "generated_sequences.fasta")
+    for header, struct in items:
+        cond = one_hot_struct(struct).unsqueeze(0).to(device)
+        total_to_gen = args.n_samples
+        generated = []
 
-        with open(fasta_path, "w") as f:
-            for i, seq in enumerate(generated_sequences):
-                decoded_seq = decode_sequence(seq)
-                f.write(f">Generated_{i+1}\n{decoded_seq}\n")
-        
-        print("Successfully saved generated sequences to", fasta_path)
+        while total_to_gen > 0:
+            cur = min(total_to_gen, args.batch_generate)
+            zs = torch.randn(cur, args.latent_dim, device=device)
+            with torch.no_grad():
+                outs = generator(zs, cond.repeat(cur,1,1))
+            for i in range(outs.size(0)):
+                seq = one_hot_to_rna(outs[i].cpu())
+                generated.append(seq)
+            total_to_gen -= cur
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate RNA sequences using a trained generator")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to the trained generator model")
-    parser.add_argument("--total_sequences", type=int, default=1000, help="Number of sequences to generate")
-    parser.add_argument("--sequence_length", type=int, default=109, help="Length of the generated sequences")
-    parser.add_argument("--output_dir", type=str, default="generated_fasta", help="Directory to save generated sequences")
-    parser.add_argument("--latent_dim", type=int, default=256, help="Latent dimension for noise generation")
-    parser.add_argument("--device", type=str, default="cpu", help="Device to use for generation (cpu or cuda)")
-    args = parser.parse_args()
+        for i, seq in enumerate(generated):
+            out_f.write(f">{header}_gen{i}\n{seq}\n")
 
-    generator = ResNetGenerator(args.latent_dim, args.sequence_length).to(args.device)
-    generator.load_state_dict(torch.load(args.model_path, map_location=args.device, weights_only=True))
-
-
-    save_generated_fasta(
-        generator,
-        total_sequences=args.total_sequences,
-        output_dir=args.output_dir,
-        latent_dim=args.latent_dim,
-        device=args.device
-    )
+    out_f.close()
+    print("Output saved to", args.out)
 
 if __name__ == "__main__":
     main()
