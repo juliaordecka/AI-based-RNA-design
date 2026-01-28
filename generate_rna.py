@@ -10,7 +10,7 @@ from models.resnet_generator_rna import ResNetGeneratorConditional
 
 def parse_structure(dotbracket: str):
 
-    L = len(dotbracket)
+    L = len(dotbracket) #
 
     table = {'.': [1, 0, 0], '(': [0, 1, 0], ')': [0, 0, 1]}
     roles = []
