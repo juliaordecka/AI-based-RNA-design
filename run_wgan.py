@@ -32,9 +32,9 @@ def parse_args():
                         help="Critic updates per generator update")
     parser.add_argument("--lambda_gp", type=float, default=10.0,
                         help="Gradient penalty weight")
-    parser.add_argument("--lambda_pair", type=float, default=1.0,
+    parser.add_argument("--lambda_pair", type=float, default=5.0,
                         help="Base pairing penalty weight")
-    parser.add_argument("--lambda_diversity", type=float, default=1.0,
+    parser.add_argument("--lambda_diversity", type=float, default=5.0,
                         help="Diversity penalty weight")
 
 
